@@ -13,10 +13,11 @@ Morse2Text : projet en C++ pour traduire des appuis en Morse, puis du Morse vers
 make
 ```
 
-L'executable :
+Les executables :
 
 ```sh
 ./build/morse2text
+./build/morse2text_gui
 ```
 
 ## Utilisation
@@ -38,7 +39,24 @@ Convention utilisee :
 - un espace separe deux lettres Morse
 - `/` separe deux mots
 
+## Interface graphique
 
+Compiler la fenetre macOS :
+
+```sh
+make gui
+```
+
+Lancer la fenetre :
+
+```sh
+./build/morse2text_gui
+```
+
+La fenetre est divisee en deux parties :
+
+- a gauche, un bouton qui reste visuellement presse tant que le clic est maintenu
+- a droite, une zone vide reservee pour la future retranscription texte
 
 ## Unit_Tests
 
@@ -53,6 +71,7 @@ Les tests couvrent le dictionnaire Morse, la traduction texte/Morse, la traducti
 ```text
 include/morse2text/      Headers publics du projet
 src/                     Implementation C++
+src/gui_main.mm          Fenetre macOS native
 tests/                   Tests unitaires sans dependance externe
 docs/changelogs/         Historique des changements
 Makefile                 Compilation, tests et nettoyage
