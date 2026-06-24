@@ -1,7 +1,7 @@
 CXX := c++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Werror -Iinclude
 OBJCXXFLAGS := $(CXXFLAGS) -fobjc-arc
-GUI_LDFLAGS := -framework Cocoa
+GUI_LDFLAGS := -framework Cocoa -framework AVFoundation
 BUILD_DIR := build
 
 CORE_SRC := \

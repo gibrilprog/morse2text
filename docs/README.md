@@ -56,6 +56,7 @@ Lancer la fenetre :
 La fenetre est divisee en deux parties :
 
 - a gauche, un bouton qui reste visuellement presse tant que le clic est maintenu
+- le bouton joue un son type Morse continu tant que le clic est maintenu
 - a droite, une zone vide reservee pour la future retranscription texte
 
 ## Unit_Tests

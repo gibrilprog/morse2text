@@ -1,7 +1,91 @@
 #import <Cocoa/Cocoa.h>
+#import <AVFoundation/AVFoundation.h>
+
+#include <cmath>
+
+namespace {
+
+constexpr double sinePi = 3.14159265358979323846;
+
+} // namespace
+
+@interface MorseTonePlayer : NSObject
+@property(nonatomic, strong) AVAudioEngine *engine;
+@property(nonatomic, strong) AVAudioSourceNode *sourceNode;
+@end
+
+@implementation MorseTonePlayer
+
+- (instancetype)init
+{
+    self = [super init];
+    if (self != nil) {
+        constexpr double sampleRate = 44100.0;
+        constexpr double frequency = 700.0;
+        constexpr double volume = 0.20;
+        constexpr double phaseStep = 2.0 * sinePi * frequency / sampleRate;
+        __block double phase = 0.0;
+
+        _engine = [[AVAudioEngine alloc] init];
+        AVAudioFormat *format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:1];
+        _sourceNode = [[AVAudioSourceNode alloc] initWithRenderBlock:^OSStatus(
+            BOOL *isSilence,
+            const AudioTimeStamp *timestamp,
+            AVAudioFrameCount frameCount,
+            AudioBufferList *outputData
+        ) {
+            (void)timestamp;
+
+            *isSilence = NO;
+            for (AVAudioFrameCount frame = 0; frame < frameCount; ++frame) {
+                const float sample = static_cast<float>(std::sin(phase) * volume);
+
+                for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; ++bufferIndex) {
+                    auto *buffer = static_cast<float *>(outputData->mBuffers[bufferIndex].mData);
+                    buffer[frame] = sample;
+                }
+
+                phase += phaseStep;
+                if (phase >= 2.0 * sinePi) {
+                    phase -= 2.0 * sinePi;
+                }
+            }
+
+            return noErr;
+        }];
+
+        [_engine attachNode:_sourceNode];
+        [_engine connect:_sourceNode to:[_engine mainMixerNode] format:format];
+        [_engine prepare];
+    }
+
+    return self;
+}
+
+- (void)start
+{
+    if ([self.engine isRunning]) {
+        return;
+    }
+
+    NSError *error = nil;
+    if (![self.engine startAndReturnError:&error]) {
+        NSBeep();
+    }
+}
+
+- (void)stop
+{
+    if ([self.engine isRunning]) {
+        [self.engine pause];
+    }
+}
+
+@end
 
 @interface HoldButtonView : NSView
 @property(nonatomic, assign) BOOL pressed;
+@property(nonatomic, strong) MorseTonePlayer *tonePlayer;
 @end
 
 @implementation HoldButtonView
@@ -11,6 +95,7 @@
     self = [super initWithFrame:frame];
     if (self != nil) {
         _pressed = NO;
+        _tonePlayer = [[MorseTonePlayer alloc] init];
         [self setWantsLayer:YES];
     }
     return self;
@@ -32,6 +117,7 @@
 
     self.pressed = YES;
     [self setNeedsDisplay:YES];
+    [self startTone];
 
     BOOL tracking = YES;
     while (tracking) {
@@ -42,8 +128,19 @@
         }
     }
 
+    [self stopTone];
     self.pressed = NO;
     [self setNeedsDisplay:YES];
+}
+
+- (void)startTone
+{
+    [self.tonePlayer start];
+}
+
+- (void)stopTone
+{
+    [self.tonePlayer stop];
 }
 
 - (void)drawRect:(NSRect)dirtyRect
