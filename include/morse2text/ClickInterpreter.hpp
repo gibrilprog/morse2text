@@ -7,9 +7,10 @@
 namespace m2t {
 
 struct TimingConfig {
-    std::chrono::milliseconds dashThreshold{1000};
+    std::chrono::milliseconds dotDuration{200};
+    std::chrono::milliseconds dashDuration{500};
     std::chrono::milliseconds letterGap{1000};
-    std::chrono::milliseconds wordGap{2000};
+    std::chrono::milliseconds wordGap{1000};
 };
 
 class ClickInterpreter {
@@ -28,6 +29,7 @@ public:
     const std::string& pendingSymbol() const;
 
 private:
+    char symbolForDuration(Milliseconds duration) const;
     void finalizeLetter();
     void appendWordGap();
 

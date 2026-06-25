@@ -10,9 +10,13 @@ ClickInterpreter::ClickInterpreter(TimingConfig config)
     : config_(config)
     , wordGapEmitted_(false)
 {
-    if (config_.dashThreshold.count() <= 0 || config_.letterGap.count() <= 0
-        || config_.wordGap.count() <= 0) {
+    if (config_.dotDuration.count() <= 0 || config_.dashDuration.count() <= 0
+        || config_.letterGap.count() <= 0 || config_.wordGap.count() <= 0) {
         throw std::invalid_argument("Timing values must be positive");
+    }
+
+    if (config_.dotDuration >= config_.dashDuration) {
+        throw std::invalid_argument("dotDuration must be lower than dashDuration");
     }
 
     if (config_.letterGap > config_.wordGap) {
@@ -40,7 +44,7 @@ void ClickInterpreter::release(Milliseconds timestamp)
         throw std::invalid_argument("Release timestamp cannot be earlier than press timestamp");
     }
 
-    pendingSymbol_.push_back(duration >= config_.dashThreshold ? '-' : '.');
+    pendingSymbol_.push_back(symbolForDuration(duration));
     pressStart_.reset();
     lastRelease_ = timestamp;
     wordGapEmitted_ = false;
@@ -85,6 +89,11 @@ const std::string& ClickInterpreter::message() const
 const std::string& ClickInterpreter::pendingSymbol() const
 {
     return pendingSymbol_;
+}
+
+char ClickInterpreter::symbolForDuration(Milliseconds duration) const
+{
+    return duration >= config_.dashDuration ? '-' : '.';
 }
 
 void ClickInterpreter::finalizeLetter()

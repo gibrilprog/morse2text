@@ -6,6 +6,23 @@
 namespace {
 
 constexpr double sinePi = 3.14159265358979323846;
+constexpr double dotTargetSeconds = 0.2;
+constexpr double dashTargetSeconds = 0.5;
+constexpr double wordGapSeconds = 1.0;
+constexpr double timerRefreshSeconds = 1.0 / 60.0;
+
+double clampedValue(double value, double minimum, double maximum)
+{
+    if (value < minimum) {
+        return minimum;
+    }
+
+    if (value > maximum) {
+        return maximum;
+    }
+
+    return value;
+}
 
 } // namespace
 
@@ -85,7 +102,20 @@ constexpr double sinePi = 3.14159265358979323846;
 
 @interface HoldButtonView : NSView
 @property(nonatomic, assign) BOOL pressed;
+@property(nonatomic, assign) NSTimeInterval holdDuration;
+@property(nonatomic, assign) NSTimeInterval idleRemaining;
+@property(nonatomic, assign) BOOL spacePending;
+@property(nonatomic, strong) NSDate *pressStartedAt;
+@property(nonatomic, strong) NSDate *lastReleasedAt;
+@property(nonatomic, strong) NSTimer *refreshTimer;
 @property(nonatomic, strong) MorseTonePlayer *tonePlayer;
+- (void)startRefreshTimer;
+- (void)stopRefreshTimer;
+- (void)refreshTimers:(NSTimer *)timer;
+- (void)updateTimers;
+- (BOOL)shouldInsertSpaceAfterIdle;
+- (void)drawPressTimerInRect:(NSRect)timerRect;
+- (void)drawIdleTimerInRect:(NSRect)timerRect;
 @end
 
 @implementation HoldButtonView
@@ -95,6 +125,12 @@ constexpr double sinePi = 3.14159265358979323846;
     self = [super initWithFrame:frame];
     if (self != nil) {
         _pressed = NO;
+        _holdDuration = 0.0;
+        _idleRemaining = wordGapSeconds;
+        _spacePending = NO;
+        _pressStartedAt = nil;
+        _lastReleasedAt = nil;
+        _refreshTimer = nil;
         _tonePlayer = [[MorseTonePlayer alloc] init];
         [self setWantsLayer:YES];
     }
@@ -104,6 +140,23 @@ constexpr double sinePi = 3.14159265358979323846;
 - (BOOL)isFlipped
 {
     return YES;
+}
+
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+
+    if ([self window] == nil) {
+        [self stopRefreshTimer];
+        return;
+    }
+
+    [self startRefreshTimer];
+}
+
+- (void)dealloc
+{
+    [self stopRefreshTimer];
 }
 
 - (void)resetCursorRects
@@ -116,21 +169,89 @@ constexpr double sinePi = 3.14159265358979323846;
     (void)event;
 
     self.pressed = YES;
+    self.holdDuration = 0.0;
+    self.idleRemaining = wordGapSeconds;
+    self.spacePending = NO;
+    self.pressStartedAt = [NSDate date];
+    self.lastReleasedAt = nil;
     [self setNeedsDisplay:YES];
     [self startTone];
 
     BOOL tracking = YES;
     while (tracking) {
-        NSEvent *nextEvent = [[self window] nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp];
+        NSEvent *nextEvent = [[self window] nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp
+                                                        untilDate:[NSDate dateWithTimeIntervalSinceNow:1.0 / 60.0]
+                                                           inMode:NSEventTrackingRunLoopMode
+                                                          dequeue:YES];
+        [self updateTimers];
+
+        if (nextEvent == nil) {
+            continue;
+        }
 
         if ([nextEvent type] == NSEventTypeLeftMouseUp) {
             tracking = NO;
         }
     }
 
+    [self updateTimers];
     [self stopTone];
     self.pressed = NO;
+    self.pressStartedAt = nil;
+    self.lastReleasedAt = [NSDate date];
     [self setNeedsDisplay:YES];
+}
+
+- (void)startRefreshTimer
+{
+    if (self.refreshTimer != nil) {
+        return;
+    }
+
+    self.refreshTimer = [NSTimer timerWithTimeInterval:timerRefreshSeconds
+                                                target:self
+                                              selector:@selector(refreshTimers:)
+                                              userInfo:nil
+                                               repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.refreshTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopRefreshTimer
+{
+    [self.refreshTimer invalidate];
+    self.refreshTimer = nil;
+}
+
+- (void)refreshTimers:(NSTimer *)timer
+{
+    (void)timer;
+    [self updateTimers];
+}
+
+- (void)updateTimers
+{
+    if (self.pressed && self.pressStartedAt != nil) {
+        self.holdDuration = -[self.pressStartedAt timeIntervalSinceNow];
+        self.idleRemaining = wordGapSeconds;
+        self.spacePending = NO;
+    } else if (self.lastReleasedAt != nil) {
+        const NSTimeInterval idleTime = -[self.lastReleasedAt timeIntervalSinceNow];
+
+        self.idleRemaining = clampedValue(wordGapSeconds - idleTime, 0.0, wordGapSeconds);
+        if (self.idleRemaining <= 0.0) {
+            // Future transcription hook: when connected, this state should insert a word space.
+            self.spacePending = YES;
+        }
+    } else {
+        self.idleRemaining = wordGapSeconds;
+    }
+
+    [self setNeedsDisplay:YES];
+}
+
+- (BOOL)shouldInsertSpaceAfterIdle
+{
+    return self.spacePending;
 }
 
 - (void)startTone
@@ -147,7 +268,25 @@ constexpr double sinePi = 3.14159265358979323846;
 {
     (void)dirtyRect;
 
-    const NSRect buttonRect = NSInsetRect([self bounds], 2.0, 2.0);
+    const NSRect bounds = [self bounds];
+    const CGFloat pressTimerHeight = 40.0;
+    const CGFloat buttonHeight = 104.0;
+    const CGFloat idleTimerHeight = 48.0;
+    const CGFloat buttonGap = 12.0;
+    const CGFloat idleGap = 12.0;
+    const NSRect pressTimerRect = NSMakeRect(10.0, 2.0, bounds.size.width - 20.0, pressTimerHeight);
+    const NSRect buttonRect = NSMakeRect(
+        2.0,
+        pressTimerHeight + buttonGap,
+        bounds.size.width - 4.0,
+        buttonHeight
+    );
+    const NSRect idleTimerRect = NSMakeRect(
+        10.0,
+        NSMaxY(buttonRect) + idleGap,
+        bounds.size.width - 20.0,
+        idleTimerHeight
+    );
     NSBezierPath *buttonPath = [NSBezierPath bezierPathWithRoundedRect:buttonRect xRadius:10.0 yRadius:10.0];
 
     NSColor *fillColor = self.pressed
@@ -157,6 +296,9 @@ constexpr double sinePi = 3.14159265358979323846;
         ? [NSColor colorWithCalibratedRed:0.03 green:0.18 blue:0.40 alpha:1.0]
         : [NSColor colorWithCalibratedRed:0.53 green:0.60 blue:0.68 alpha:1.0];
     NSColor *textColor = self.pressed ? [NSColor whiteColor] : [NSColor colorWithCalibratedWhite:0.13 alpha:1.0];
+
+    [self drawPressTimerInRect:pressTimerRect];
+    [self drawIdleTimerInRect:idleTimerRect];
 
     [fillColor setFill];
     [buttonPath fill];
@@ -187,6 +329,147 @@ constexpr double sinePi = 3.14159265358979323846;
 
     [title drawInRect:titleRect withAttributes:titleAttributes];
     [subtitle drawInRect:subtitleRect withAttributes:subtitleAttributes];
+}
+
+- (void)drawPressTimerInRect:(NSRect)timerRect
+{
+    const CGFloat trackHeight = 8.0;
+    const CGFloat labelHeight = 16.0;
+    const NSRect trackRect = NSMakeRect(
+        timerRect.origin.x,
+        timerRect.origin.y + labelHeight,
+        timerRect.size.width,
+        trackHeight
+    );
+    double cappedDuration = self.holdDuration;
+    if (cappedDuration < 0.0) {
+        cappedDuration = 0.0;
+    }
+    if (cappedDuration > dashTargetSeconds) {
+        cappedDuration = dashTargetSeconds;
+    }
+
+    const CGFloat fillWidth = trackRect.size.width * static_cast<CGFloat>(cappedDuration / dashTargetSeconds);
+    const NSRect fillRect = NSMakeRect(trackRect.origin.x, trackRect.origin.y, fillWidth, trackRect.size.height);
+    const CGFloat dotTargetX = trackRect.origin.x + trackRect.size.width * static_cast<CGFloat>(dotTargetSeconds / dashTargetSeconds);
+    const CGFloat dashTargetX = NSMaxX(trackRect);
+    const CGFloat indicatorX = trackRect.origin.x + fillWidth;
+
+    NSMutableParagraphStyle *centeredStyle = [[NSMutableParagraphStyle alloc] init];
+    [centeredStyle setAlignment:NSTextAlignmentCenter];
+
+    NSDictionary *timeAttributes = @{
+        NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:13.0 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.12 alpha:1.0],
+        NSParagraphStyleAttributeName: centeredStyle,
+    };
+    NSDictionary *markerAttributes = @{
+        NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:11.0 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.36 alpha:1.0],
+        NSParagraphStyleAttributeName: centeredStyle,
+    };
+
+    NSString *durationText = [NSString stringWithFormat:@"%.1fs", cappedDuration];
+    [durationText drawInRect:NSMakeRect(timerRect.origin.x, timerRect.origin.y - 1.0, timerRect.size.width, labelHeight)
+              withAttributes:timeAttributes];
+
+    NSBezierPath *trackPath = [NSBezierPath bezierPathWithRoundedRect:trackRect xRadius:trackHeight / 2.0 yRadius:trackHeight / 2.0];
+    [[NSColor colorWithCalibratedRed:0.82 green:0.86 blue:0.90 alpha:1.0] setFill];
+    [trackPath fill];
+
+    if (fillWidth > 0.0) {
+        NSBezierPath *fillPath = [NSBezierPath bezierPathWithRoundedRect:fillRect xRadius:trackHeight / 2.0 yRadius:trackHeight / 2.0];
+        [[NSColor colorWithCalibratedRed:0.12 green:0.45 blue:0.82 alpha:1.0] setFill];
+        [fillPath fill];
+    }
+
+    [[NSColor colorWithCalibratedWhite:0.27 alpha:1.0] setStroke];
+    NSBezierPath *dotMarker = [NSBezierPath bezierPath];
+    [dotMarker moveToPoint:NSMakePoint(dotTargetX, trackRect.origin.y - 3.0)];
+    [dotMarker lineToPoint:NSMakePoint(dotTargetX, trackRect.origin.y + trackRect.size.height + 3.0)];
+    [dotMarker setLineWidth:1.0];
+    [dotMarker stroke];
+
+    NSBezierPath *dashMarker = [NSBezierPath bezierPath];
+    [dashMarker moveToPoint:NSMakePoint(dashTargetX, trackRect.origin.y - 3.0)];
+    [dashMarker lineToPoint:NSMakePoint(dashTargetX, trackRect.origin.y + trackRect.size.height + 3.0)];
+    [dashMarker setLineWidth:1.0];
+    [dashMarker stroke];
+
+    [[NSColor colorWithCalibratedRed:0.03 green:0.18 blue:0.40 alpha:1.0] setStroke];
+    NSBezierPath *indicator = [NSBezierPath bezierPath];
+    [indicator moveToPoint:NSMakePoint(indicatorX, trackRect.origin.y - 5.0)];
+    [indicator lineToPoint:NSMakePoint(indicatorX, trackRect.origin.y + trackRect.size.height + 5.0)];
+    [indicator setLineWidth:2.0];
+    [indicator stroke];
+
+    const CGFloat markerY = trackRect.origin.y + trackRect.size.height + 2.0;
+    [@"0" drawInRect:NSMakeRect(trackRect.origin.x - 12.0, markerY, 24.0, 14.0) withAttributes:markerAttributes];
+    [@"0.2" drawInRect:NSMakeRect(dotTargetX - 18.0, markerY, 36.0, 14.0) withAttributes:markerAttributes];
+    [@"0.5" drawInRect:NSMakeRect(dashTargetX - 18.0, markerY, 36.0, 14.0) withAttributes:markerAttributes];
+}
+
+- (void)drawIdleTimerInRect:(NSRect)timerRect
+{
+    const CGFloat labelHeight = 18.0;
+    const CGFloat trackHeight = 8.0;
+    const NSRect trackRect = NSMakeRect(
+        timerRect.origin.x,
+        timerRect.origin.y + labelHeight + 2.0,
+        timerRect.size.width,
+        trackHeight
+    );
+    const double cappedRemaining = clampedValue(self.idleRemaining, 0.0, wordGapSeconds);
+    const CGFloat fillWidth = trackRect.size.width * static_cast<CGFloat>(cappedRemaining / wordGapSeconds);
+    const NSRect fillRect = NSMakeRect(trackRect.origin.x, trackRect.origin.y, fillWidth, trackRect.size.height);
+    const CGFloat halfSecondX = trackRect.origin.x + trackRect.size.width / 2.0;
+    const CGFloat oneSecondX = NSMaxX(trackRect);
+
+    NSMutableParagraphStyle *centeredStyle = [[NSMutableParagraphStyle alloc] init];
+    [centeredStyle setAlignment:NSTextAlignmentCenter];
+
+    NSDictionary *titleAttributes = @{
+        NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:11.0 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.18 alpha:1.0],
+        NSParagraphStyleAttributeName: centeredStyle,
+    };
+    NSDictionary *markerAttributes = @{
+        NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:11.0 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName: [NSColor colorWithCalibratedWhite:0.36 alpha:1.0],
+        NSParagraphStyleAttributeName: centeredStyle,
+    };
+
+    NSString *title = [NSString stringWithFormat:@"Temps restant avant un espace %.1fs", cappedRemaining];
+    [title drawInRect:NSMakeRect(timerRect.origin.x, timerRect.origin.y, timerRect.size.width, labelHeight)
+       withAttributes:titleAttributes];
+
+    NSBezierPath *trackPath = [NSBezierPath bezierPathWithRoundedRect:trackRect xRadius:trackHeight / 2.0 yRadius:trackHeight / 2.0];
+    [[NSColor colorWithCalibratedRed:0.84 green:0.86 blue:0.88 alpha:1.0] setFill];
+    [trackPath fill];
+
+    if (fillWidth > 0.0) {
+        NSBezierPath *fillPath = [NSBezierPath bezierPathWithRoundedRect:fillRect xRadius:trackHeight / 2.0 yRadius:trackHeight / 2.0];
+        [[NSColor colorWithCalibratedRed:0.86 green:0.43 blue:0.18 alpha:1.0] setFill];
+        [fillPath fill];
+    }
+
+    [[NSColor colorWithCalibratedWhite:0.27 alpha:1.0] setStroke];
+    NSBezierPath *halfSecondMarker = [NSBezierPath bezierPath];
+    [halfSecondMarker moveToPoint:NSMakePoint(halfSecondX, trackRect.origin.y - 3.0)];
+    [halfSecondMarker lineToPoint:NSMakePoint(halfSecondX, trackRect.origin.y + trackRect.size.height + 3.0)];
+    [halfSecondMarker setLineWidth:1.0];
+    [halfSecondMarker stroke];
+
+    NSBezierPath *oneSecondMarker = [NSBezierPath bezierPath];
+    [oneSecondMarker moveToPoint:NSMakePoint(oneSecondX, trackRect.origin.y - 3.0)];
+    [oneSecondMarker lineToPoint:NSMakePoint(oneSecondX, trackRect.origin.y + trackRect.size.height + 3.0)];
+    [oneSecondMarker setLineWidth:1.0];
+    [oneSecondMarker stroke];
+
+    const CGFloat markerY = trackRect.origin.y + trackRect.size.height + 2.0;
+    [@"0" drawInRect:NSMakeRect(trackRect.origin.x - 12.0, markerY, 24.0, 14.0) withAttributes:markerAttributes];
+    [@"0.5" drawInRect:NSMakeRect(halfSecondX - 18.0, markerY, 36.0, 14.0) withAttributes:markerAttributes];
+    [@"1" drawInRect:NSMakeRect(oneSecondX - 12.0, markerY, 24.0, 14.0) withAttributes:markerAttributes];
 }
 
 @end
@@ -236,7 +519,7 @@ constexpr double sinePi = 3.14159265358979323846;
     [self.leftPane setFrame:NSMakeRect(0.0, 0.0, leftWidth, bounds.size.height)];
     [self.rightPane setFrame:NSMakeRect(leftWidth + dividerWidth, 0.0, rightWidth, bounds.size.height)];
 
-    const NSSize buttonSize = NSMakeSize(240.0, 104.0);
+    const NSSize buttonSize = NSMakeSize(300.0, 216.0);
     const CGFloat buttonX = floor((leftWidth - buttonSize.width) / 2.0);
     const CGFloat buttonY = floor((bounds.size.height - buttonSize.height) / 2.0);
     [self.holdButton setFrame:NSMakeRect(buttonX, buttonY, buttonSize.width, buttonSize.height)];

@@ -80,31 +80,50 @@ void testTranslatorErrors()
 void testClickInterpreterBuildsMessage()
 {
     m2t::TimingConfig config;
-    config.dashThreshold = std::chrono::milliseconds(1000);
+    config.dotDuration = std::chrono::milliseconds(200);
+    config.dashDuration = std::chrono::milliseconds(500);
     config.letterGap = std::chrono::milliseconds(500);
-    config.wordGap = std::chrono::milliseconds(2000);
+    config.wordGap = std::chrono::milliseconds(1000);
 
     m2t::ClickInterpreter interpreter(config);
 
     interpreter.press(std::chrono::milliseconds(0));
-    interpreter.release(std::chrono::milliseconds(100));
-    interpreter.press(std::chrono::milliseconds(200));
-    interpreter.release(std::chrono::milliseconds(300));
-    interpreter.press(std::chrono::milliseconds(400));
+    interpreter.release(std::chrono::milliseconds(200));
+    interpreter.press(std::chrono::milliseconds(300));
     interpreter.release(std::chrono::milliseconds(500));
-    interpreter.tick(std::chrono::milliseconds(1100));
+    interpreter.press(std::chrono::milliseconds(600));
+    interpreter.release(std::chrono::milliseconds(800));
+    interpreter.tick(std::chrono::milliseconds(1400));
     requireEqual(interpreter.message(), "S");
 
-    interpreter.tick(std::chrono::milliseconds(2600));
-    interpreter.tick(std::chrono::milliseconds(2800));
+    interpreter.tick(std::chrono::milliseconds(1800));
     requireEqual(interpreter.message(), "S ");
 
     interpreter.press(std::chrono::milliseconds(3000));
-    interpreter.release(std::chrono::milliseconds(3100));
-    interpreter.press(std::chrono::milliseconds(3200));
-    interpreter.release(std::chrono::milliseconds(4300));
+    interpreter.release(std::chrono::milliseconds(3200));
+    interpreter.press(std::chrono::milliseconds(3300));
+    interpreter.release(std::chrono::milliseconds(3800));
     interpreter.flush();
     requireEqual(interpreter.message(), "S A");
+}
+
+void testClickInterpreterTimingBoundaries()
+{
+    m2t::ClickInterpreter interpreter;
+
+    interpreter.press(std::chrono::milliseconds(0));
+    interpreter.release(std::chrono::milliseconds(200));
+    requireEqual(interpreter.pendingSymbol(), ".");
+
+    interpreter.reset();
+    interpreter.press(std::chrono::milliseconds(0));
+    interpreter.release(std::chrono::milliseconds(499));
+    requireEqual(interpreter.pendingSymbol(), ".");
+
+    interpreter.reset();
+    interpreter.press(std::chrono::milliseconds(0));
+    interpreter.release(std::chrono::milliseconds(500));
+    requireEqual(interpreter.pendingSymbol(), "-");
 }
 
 void testClickInterpreterErrors()
@@ -119,6 +138,13 @@ void testClickInterpreterErrors()
     requireThrows<std::logic_error>([&interpreter] {
         interpreter.press(std::chrono::milliseconds(60));
     });
+
+    m2t::TimingConfig config;
+    config.dotDuration = std::chrono::milliseconds(1000);
+    config.dashDuration = std::chrono::milliseconds(200);
+    requireThrows<std::invalid_argument>([&config] {
+        m2t::ClickInterpreter invalidInterpreter(config);
+    });
 }
 
 } // namespace
@@ -131,6 +157,7 @@ int main()
         {"Morse to text", testMorseToText},
         {"Translator errors", testTranslatorErrors},
         {"Click interpreter builds message", testClickInterpreterBuildsMessage},
+        {"Click interpreter timing boundaries", testClickInterpreterTimingBoundaries},
         {"Click interpreter errors", testClickInterpreterErrors},
     };
 
