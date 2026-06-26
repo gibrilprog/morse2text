@@ -94,9 +94,11 @@ void testClickInterpreterBuildsMessage()
     interpreter.press(std::chrono::milliseconds(600));
     interpreter.release(std::chrono::milliseconds(800));
     interpreter.tick(std::chrono::milliseconds(1400));
+    requireEqual(interpreter.morse(), "... ");
     requireEqual(interpreter.message(), "S");
 
     interpreter.tick(std::chrono::milliseconds(1800));
+    requireEqual(interpreter.morse(), "... / ");
     requireEqual(interpreter.message(), "S ");
 
     interpreter.press(std::chrono::milliseconds(3000));
@@ -104,6 +106,7 @@ void testClickInterpreterBuildsMessage()
     interpreter.press(std::chrono::milliseconds(3300));
     interpreter.release(std::chrono::milliseconds(3800));
     interpreter.flush();
+    requireEqual(interpreter.morse(), "... / .- ");
     requireEqual(interpreter.message(), "S A");
 }
 
@@ -113,6 +116,7 @@ void testClickInterpreterTimingBoundaries()
 
     interpreter.press(std::chrono::milliseconds(0));
     interpreter.release(std::chrono::milliseconds(200));
+    requireEqual(interpreter.morse(), ".");
     requireEqual(interpreter.pendingSymbol(), ".");
 
     interpreter.reset();

@@ -11,11 +11,12 @@ CORE_SRC := \
 
 APP_SRC := src/main.cpp $(CORE_SRC)
 TEST_SRC := tests/test_main.cpp $(CORE_SRC)
-GUI_SRC := src/gui_main.mm
+GUI_MM_SRC := src/gui_main.mm
+GUI_CPP_SRC := $(CORE_SRC)
 
 APP_OBJ := $(APP_SRC:%.cpp=$(BUILD_DIR)/%.o)
 TEST_OBJ := $(TEST_SRC:%.cpp=$(BUILD_DIR)/%.o)
-GUI_OBJ := $(GUI_SRC:%.mm=$(BUILD_DIR)/%.o)
+GUI_OBJ := $(GUI_MM_SRC:%.mm=$(BUILD_DIR)/%.o) $(GUI_CPP_SRC:%.cpp=$(BUILD_DIR)/%.o)
 
 APP_BIN := $(BUILD_DIR)/morse2text
 TEST_BIN := $(BUILD_DIR)/morse2text_tests

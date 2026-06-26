@@ -1,7 +1,11 @@
 #import <Cocoa/Cocoa.h>
 #import <AVFoundation/AVFoundation.h>
 
+#include "morse2text/ClickInterpreter.hpp"
+
 #include <cmath>
+#include <exception>
+#include <string>
 
 namespace {
 
@@ -22,6 +26,13 @@ double clampedValue(double value, double minimum, double maximum)
     }
 
     return value;
+}
+
+m2t::ClickInterpreter::Milliseconds timestampFromDate(NSDate *date)
+{
+    return m2t::ClickInterpreter::Milliseconds(
+        static_cast<long long>([date timeIntervalSinceReferenceDate] * 1000.0)
+    );
 }
 
 } // namespace
@@ -100,6 +111,14 @@ double clampedValue(double value, double minimum, double maximum)
 
 @end
 
+@class HoldButtonView;
+
+@protocol HoldButtonViewDelegate <NSObject>
+- (void)holdButtonDidPress:(HoldButtonView *)button atTime:(NSDate *)timestamp;
+- (void)holdButtonDidRelease:(HoldButtonView *)button atTime:(NSDate *)timestamp;
+- (void)holdButtonDidTick:(HoldButtonView *)button atTime:(NSDate *)timestamp;
+@end
+
 @interface HoldButtonView : NSView
 @property(nonatomic, assign) BOOL pressed;
 @property(nonatomic, assign) NSTimeInterval holdDuration;
@@ -109,6 +128,7 @@ double clampedValue(double value, double minimum, double maximum)
 @property(nonatomic, strong) NSDate *lastReleasedAt;
 @property(nonatomic, strong) NSTimer *refreshTimer;
 @property(nonatomic, strong) MorseTonePlayer *tonePlayer;
+@property(nonatomic, weak) id<HoldButtonViewDelegate> delegate;
 - (void)startRefreshTimer;
 - (void)stopRefreshTimer;
 - (void)refreshTimers:(NSTimer *)timer;
@@ -168,12 +188,14 @@ double clampedValue(double value, double minimum, double maximum)
 {
     (void)event;
 
+    NSDate *pressDate = [NSDate date];
     self.pressed = YES;
     self.holdDuration = 0.0;
     self.idleRemaining = wordGapSeconds;
     self.spacePending = NO;
-    self.pressStartedAt = [NSDate date];
+    self.pressStartedAt = pressDate;
     self.lastReleasedAt = nil;
+    [self.delegate holdButtonDidPress:self atTime:pressDate];
     [self setNeedsDisplay:YES];
     [self startTone];
 
@@ -195,10 +217,12 @@ double clampedValue(double value, double minimum, double maximum)
     }
 
     [self updateTimers];
+    NSDate *releaseDate = [NSDate date];
     [self stopTone];
     self.pressed = NO;
     self.pressStartedAt = nil;
-    self.lastReleasedAt = [NSDate date];
+    self.lastReleasedAt = releaseDate;
+    [self.delegate holdButtonDidRelease:self atTime:releaseDate];
     [self setNeedsDisplay:YES];
 }
 
@@ -247,6 +271,9 @@ double clampedValue(double value, double minimum, double maximum)
     }
 
     [self setNeedsDisplay:YES];
+    if (!self.pressed && self.lastReleasedAt != nil) {
+        [self.delegate holdButtonDidTick:self atTime:[NSDate date]];
+    }
 }
 
 - (BOOL)shouldInsertSpaceAfterIdle
@@ -474,10 +501,24 @@ double clampedValue(double value, double minimum, double maximum)
 
 @end
 
-@interface SplitWindowView : NSView
+@interface SplitWindowView : NSView <HoldButtonViewDelegate> {
+    m2t::ClickInterpreter _interpreter;
+}
 @property(nonatomic, strong) NSView *leftPane;
 @property(nonatomic, strong) NSView *rightPane;
 @property(nonatomic, strong) HoldButtonView *holdButton;
+@property(nonatomic, strong) NSTextField *morseTitle;
+@property(nonatomic, strong) NSTextField *wordsTitle;
+@property(nonatomic, strong) NSScrollView *morseScrollView;
+@property(nonatomic, strong) NSScrollView *wordsScrollView;
+@property(nonatomic, strong) NSTextView *morseTextView;
+@property(nonatomic, strong) NSTextView *wordsTextView;
+@property(nonatomic, copy) NSString *transcriptionError;
+- (NSTextField *)makeTitleLabel:(NSString *)title;
+- (NSTextView *)makeTextViewWithFont:(NSFont *)font;
+- (NSScrollView *)makeScrollViewWithTextView:(NSTextView *)textView;
+- (void)updateTranscriptionViews;
+- (void)handleInterpreterException:(const std::exception&)exception;
 @end
 
 @implementation SplitWindowView
@@ -489,6 +530,12 @@ double clampedValue(double value, double minimum, double maximum)
         _leftPane = [[NSView alloc] initWithFrame:NSZeroRect];
         _rightPane = [[NSView alloc] initWithFrame:NSZeroRect];
         _holdButton = [[HoldButtonView alloc] initWithFrame:NSZeroRect];
+        _morseTitle = [self makeTitleLabel:@"Morse"];
+        _wordsTitle = [self makeTitleLabel:@"Mots"];
+        _morseTextView = [self makeTextViewWithFont:[NSFont monospacedSystemFontOfSize:24.0 weight:NSFontWeightRegular]];
+        _wordsTextView = [self makeTextViewWithFont:[NSFont systemFontOfSize:24.0 weight:NSFontWeightRegular]];
+        _morseScrollView = [self makeScrollViewWithTextView:_morseTextView];
+        _wordsScrollView = [self makeScrollViewWithTextView:_wordsTextView];
 
         [_leftPane setWantsLayer:YES];
         [_rightPane setWantsLayer:YES];
@@ -498,6 +545,13 @@ double clampedValue(double value, double minimum, double maximum)
         [self addSubview:_leftPane];
         [self addSubview:_rightPane];
         [_leftPane addSubview:_holdButton];
+        [_rightPane addSubview:_morseTitle];
+        [_rightPane addSubview:_morseScrollView];
+        [_rightPane addSubview:_wordsTitle];
+        [_rightPane addSubview:_wordsScrollView];
+
+        [_holdButton setDelegate:self];
+        [self updateTranscriptionViews];
     }
     return self;
 }
@@ -505,6 +559,109 @@ double clampedValue(double value, double minimum, double maximum)
 - (BOOL)isFlipped
 {
     return YES;
+}
+
+- (NSTextField *)makeTitleLabel:(NSString *)title
+{
+    NSTextField *label = [[NSTextField alloc] initWithFrame:NSZeroRect];
+
+    [label setStringValue:title];
+    [label setEditable:NO];
+    [label setSelectable:NO];
+    [label setBordered:NO];
+    [label setDrawsBackground:NO];
+    [label setFont:[NSFont boldSystemFontOfSize:13.0]];
+    [label setTextColor:[NSColor colorWithCalibratedWhite:0.20 alpha:1.0]];
+    return label;
+}
+
+- (NSTextView *)makeTextViewWithFont:(NSFont *)font
+{
+    NSTextView *textView = [[NSTextView alloc] initWithFrame:NSZeroRect];
+
+    [textView setEditable:NO];
+    [textView setSelectable:YES];
+    [textView setRichText:NO];
+    [textView setDrawsBackground:NO];
+    [textView setFont:font];
+    [textView setTextColor:[NSColor colorWithCalibratedWhite:0.12 alpha:1.0]];
+    [textView setTextContainerInset:NSMakeSize(10.0, 10.0)];
+    [[textView textContainer] setWidthTracksTextView:YES];
+    return textView;
+}
+
+- (NSScrollView *)makeScrollViewWithTextView:(NSTextView *)textView
+{
+    NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
+
+    [scrollView setBorderType:NSNoBorder];
+    [scrollView setHasVerticalScroller:YES];
+    [scrollView setDrawsBackground:YES];
+    [scrollView setBackgroundColor:[NSColor colorWithCalibratedRed:0.97 green:0.98 blue:0.99 alpha:1.0]];
+    [scrollView setDocumentView:textView];
+    return scrollView;
+}
+
+- (void)updateTranscriptionViews
+{
+    NSString *morseText = [NSString stringWithUTF8String:_interpreter.morse().c_str()];
+    NSString *wordsText = self.transcriptionError != nil
+        ? self.transcriptionError
+        : [NSString stringWithUTF8String:_interpreter.message().c_str()];
+
+    [self.morseTextView setString:morseText];
+    [self.wordsTextView setString:wordsText];
+    [self.morseTextView scrollRangeToVisible:NSMakeRange([[self.morseTextView string] length], 0)];
+    [self.wordsTextView scrollRangeToVisible:NSMakeRange([[self.wordsTextView string] length], 0)];
+}
+
+- (void)handleInterpreterException:(const std::exception&)exception
+{
+    self.transcriptionError = [NSString stringWithFormat:@"Erreur: %s", exception.what()];
+    _interpreter.reset();
+    [self updateTranscriptionViews];
+}
+
+- (void)holdButtonDidPress:(HoldButtonView *)button atTime:(NSDate *)timestamp
+{
+    (void)button;
+
+    self.transcriptionError = nil;
+    try {
+        _interpreter.press(timestampFromDate(timestamp));
+    } catch (const std::exception& exception) {
+        [self handleInterpreterException:exception];
+    }
+    [self updateTranscriptionViews];
+}
+
+- (void)holdButtonDidRelease:(HoldButtonView *)button atTime:(NSDate *)timestamp
+{
+    (void)button;
+
+    self.transcriptionError = nil;
+    try {
+        _interpreter.release(timestampFromDate(timestamp));
+    } catch (const std::exception& exception) {
+        [self handleInterpreterException:exception];
+    }
+    [self updateTranscriptionViews];
+}
+
+- (void)holdButtonDidTick:(HoldButtonView *)button atTime:(NSDate *)timestamp
+{
+    (void)button;
+
+    if (self.transcriptionError != nil) {
+        return;
+    }
+
+    try {
+        _interpreter.tick(timestampFromDate(timestamp));
+    } catch (const std::exception& exception) {
+        [self handleInterpreterException:exception];
+    }
+    [self updateTranscriptionViews];
 }
 
 - (void)layout
@@ -523,6 +680,31 @@ double clampedValue(double value, double minimum, double maximum)
     const CGFloat buttonX = floor((leftWidth - buttonSize.width) / 2.0);
     const CGFloat buttonY = floor((bounds.size.height - buttonSize.height) / 2.0);
     [self.holdButton setFrame:NSMakeRect(buttonX, buttonY, buttonSize.width, buttonSize.height)];
+
+    const NSRect rightBounds = [self.rightPane bounds];
+    const CGFloat padding = 24.0;
+    const CGFloat sectionGap = 24.0;
+    const CGFloat titleHeight = 20.0;
+    const CGFloat titleGap = 8.0;
+    CGFloat sectionHeight = floor((rightBounds.size.height - padding * 2.0 - sectionGap) / 2.0);
+    if (sectionHeight < 80.0) {
+        sectionHeight = 80.0;
+    }
+
+    const CGFloat contentWidth = rightBounds.size.width - padding * 2.0;
+    const NSRect wordsSection = NSMakeRect(padding, padding, contentWidth, sectionHeight);
+    const NSRect morseSection = NSMakeRect(padding, padding + sectionHeight + sectionGap, contentWidth, sectionHeight);
+    const CGFloat textHeight = sectionHeight - titleHeight - titleGap;
+
+    [self.morseTitle setFrame:NSMakeRect(morseSection.origin.x, NSMaxY(morseSection) - titleHeight, contentWidth, titleHeight)];
+    [self.morseScrollView setFrame:NSMakeRect(morseSection.origin.x, morseSection.origin.y, contentWidth, textHeight)];
+    [self.wordsTitle setFrame:NSMakeRect(wordsSection.origin.x, NSMaxY(wordsSection) - titleHeight, contentWidth, titleHeight)];
+    [self.wordsScrollView setFrame:NSMakeRect(wordsSection.origin.x, wordsSection.origin.y, contentWidth, textHeight)];
+
+    NSRect morseContentBounds = [[self.morseScrollView contentView] bounds];
+    NSRect wordsContentBounds = [[self.wordsScrollView contentView] bounds];
+    [self.morseTextView setFrame:NSMakeRect(0.0, 0.0, morseContentBounds.size.width, morseContentBounds.size.height)];
+    [self.wordsTextView setFrame:NSMakeRect(0.0, 0.0, wordsContentBounds.size.width, wordsContentBounds.size.height)];
 }
 
 - (void)drawRect:(NSRect)dirtyRect
@@ -532,6 +714,11 @@ double clampedValue(double value, double minimum, double maximum)
     const CGFloat leftWidth = floor([self bounds].size.width / 2.0);
     [[NSColor colorWithCalibratedRed:0.76 green:0.79 blue:0.83 alpha:1.0] setFill];
     NSRectFill(NSMakeRect(leftWidth, 0.0, 1.0, [self bounds].size.height));
+
+    const CGFloat rightX = leftWidth + 1.0;
+    const CGFloat rightWidth = [self bounds].size.width - rightX;
+    const CGFloat horizontalDividerY = floor([self bounds].size.height / 2.0);
+    NSRectFill(NSMakeRect(rightX, horizontalDividerY, rightWidth, 1.0));
 }
 
 @end

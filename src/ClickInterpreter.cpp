@@ -44,7 +44,9 @@ void ClickInterpreter::release(Milliseconds timestamp)
         throw std::invalid_argument("Release timestamp cannot be earlier than press timestamp");
     }
 
-    pendingSymbol_.push_back(symbolForDuration(duration));
+    const char symbol = symbolForDuration(duration);
+    pendingSymbol_.push_back(symbol);
+    morse_.push_back(symbol);
     pressStart_.reset();
     lastRelease_ = timestamp;
     wordGapEmitted_ = false;
@@ -78,12 +80,18 @@ void ClickInterpreter::reset()
     lastRelease_.reset();
     pendingSymbol_.clear();
     message_.clear();
+    morse_.clear();
     wordGapEmitted_ = false;
 }
 
 const std::string& ClickInterpreter::message() const
 {
     return message_;
+}
+
+const std::string& ClickInterpreter::morse() const
+{
+    return morse_;
 }
 
 const std::string& ClickInterpreter::pendingSymbol() const
@@ -109,6 +117,9 @@ void ClickInterpreter::finalizeLetter()
 
     message_.push_back(*decoded);
     pendingSymbol_.clear();
+    if (!morse_.empty() && morse_.back() != ' ') {
+        morse_.push_back(' ');
+    }
 }
 
 void ClickInterpreter::appendWordGap()
@@ -119,6 +130,13 @@ void ClickInterpreter::appendWordGap()
 
     if (message_.back() != ' ') {
         message_.push_back(' ');
+    }
+
+    while (!morse_.empty() && morse_.back() == ' ') {
+        morse_.pop_back();
+    }
+    if (!morse_.empty() && morse_.back() != '/') {
+        morse_.append(" / ");
     }
 
     wordGapEmitted_ = true;

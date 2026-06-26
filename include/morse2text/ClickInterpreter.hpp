@@ -9,7 +9,7 @@ namespace m2t {
 struct TimingConfig {
     std::chrono::milliseconds dotDuration{200};
     std::chrono::milliseconds dashDuration{500};
-    std::chrono::milliseconds letterGap{1000};
+    std::chrono::milliseconds letterGap{500};
     std::chrono::milliseconds wordGap{1000};
 };
 
@@ -26,6 +26,7 @@ public:
     void reset();
 
     const std::string& message() const;
+    const std::string& morse() const;
     const std::string& pendingSymbol() const;
 
 private:
@@ -38,6 +39,7 @@ private:
     std::optional<Milliseconds> lastRelease_;
     std::string pendingSymbol_;
     std::string message_;
+    std::string morse_;
     bool wordGapEmitted_;
 };
 
