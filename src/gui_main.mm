@@ -12,7 +12,8 @@ namespace {
 constexpr double sinePi = 3.14159265358979323846;
 constexpr double dotTargetSeconds = 0.2;
 constexpr double dashTargetSeconds = 0.5;
-constexpr double wordGapSeconds = 1.0;
+constexpr double letterGapSeconds = 1.0;
+constexpr double wordGapSeconds = 2.0;
 constexpr double timerRefreshSeconds = 1.0 / 60.0;
 
 double clampedValue(double value, double minimum, double maximum)
@@ -449,8 +450,8 @@ m2t::ClickInterpreter::Milliseconds timestampFromDate(NSDate *date)
     const double cappedRemaining = clampedValue(self.idleRemaining, 0.0, wordGapSeconds);
     const CGFloat fillWidth = trackRect.size.width * static_cast<CGFloat>(cappedRemaining / wordGapSeconds);
     const NSRect fillRect = NSMakeRect(trackRect.origin.x, trackRect.origin.y, fillWidth, trackRect.size.height);
-    const CGFloat halfSecondX = trackRect.origin.x + trackRect.size.width / 2.0;
-    const CGFloat oneSecondX = NSMaxX(trackRect);
+    const CGFloat letterGapX = trackRect.origin.x + trackRect.size.width * static_cast<CGFloat>(letterGapSeconds / wordGapSeconds);
+    const CGFloat wordGapX = NSMaxX(trackRect);
 
     NSMutableParagraphStyle *centeredStyle = [[NSMutableParagraphStyle alloc] init];
     [centeredStyle setAlignment:NSTextAlignmentCenter];
@@ -466,7 +467,7 @@ m2t::ClickInterpreter::Milliseconds timestampFromDate(NSDate *date)
         NSParagraphStyleAttributeName: centeredStyle,
     };
 
-    NSString *title = [NSString stringWithFormat:@"Temps restant avant un espace %.1fs", cappedRemaining];
+    NSString *title = [NSString stringWithFormat:@"Temps restant avant fin de mot %.1fs", cappedRemaining];
     [title drawInRect:NSMakeRect(timerRect.origin.x, timerRect.origin.y, timerRect.size.width, labelHeight)
        withAttributes:titleAttributes];
 
@@ -481,22 +482,22 @@ m2t::ClickInterpreter::Milliseconds timestampFromDate(NSDate *date)
     }
 
     [[NSColor colorWithCalibratedWhite:0.27 alpha:1.0] setStroke];
-    NSBezierPath *halfSecondMarker = [NSBezierPath bezierPath];
-    [halfSecondMarker moveToPoint:NSMakePoint(halfSecondX, trackRect.origin.y - 3.0)];
-    [halfSecondMarker lineToPoint:NSMakePoint(halfSecondX, trackRect.origin.y + trackRect.size.height + 3.0)];
-    [halfSecondMarker setLineWidth:1.0];
-    [halfSecondMarker stroke];
+    NSBezierPath *letterGapMarker = [NSBezierPath bezierPath];
+    [letterGapMarker moveToPoint:NSMakePoint(letterGapX, trackRect.origin.y - 3.0)];
+    [letterGapMarker lineToPoint:NSMakePoint(letterGapX, trackRect.origin.y + trackRect.size.height + 3.0)];
+    [letterGapMarker setLineWidth:1.0];
+    [letterGapMarker stroke];
 
-    NSBezierPath *oneSecondMarker = [NSBezierPath bezierPath];
-    [oneSecondMarker moveToPoint:NSMakePoint(oneSecondX, trackRect.origin.y - 3.0)];
-    [oneSecondMarker lineToPoint:NSMakePoint(oneSecondX, trackRect.origin.y + trackRect.size.height + 3.0)];
-    [oneSecondMarker setLineWidth:1.0];
-    [oneSecondMarker stroke];
+    NSBezierPath *wordGapMarker = [NSBezierPath bezierPath];
+    [wordGapMarker moveToPoint:NSMakePoint(wordGapX, trackRect.origin.y - 3.0)];
+    [wordGapMarker lineToPoint:NSMakePoint(wordGapX, trackRect.origin.y + trackRect.size.height + 3.0)];
+    [wordGapMarker setLineWidth:1.0];
+    [wordGapMarker stroke];
 
     const CGFloat markerY = trackRect.origin.y + trackRect.size.height + 2.0;
     [@"0" drawInRect:NSMakeRect(trackRect.origin.x - 12.0, markerY, 24.0, 14.0) withAttributes:markerAttributes];
-    [@"0.5" drawInRect:NSMakeRect(halfSecondX - 18.0, markerY, 36.0, 14.0) withAttributes:markerAttributes];
-    [@"1" drawInRect:NSMakeRect(oneSecondX - 12.0, markerY, 24.0, 14.0) withAttributes:markerAttributes];
+    [@"1" drawInRect:NSMakeRect(letterGapX - 12.0, markerY, 24.0, 14.0) withAttributes:markerAttributes];
+    [@"2" drawInRect:NSMakeRect(wordGapX - 12.0, markerY, 24.0, 14.0) withAttributes:markerAttributes];
 }
 
 @end

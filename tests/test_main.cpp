@@ -82,8 +82,8 @@ void testClickInterpreterBuildsMessage()
     m2t::TimingConfig config;
     config.dotDuration = std::chrono::milliseconds(200);
     config.dashDuration = std::chrono::milliseconds(500);
-    config.letterGap = std::chrono::milliseconds(500);
-    config.wordGap = std::chrono::milliseconds(1000);
+    config.letterGap = std::chrono::milliseconds(1000);
+    config.wordGap = std::chrono::milliseconds(2000);
 
     m2t::ClickInterpreter interpreter(config);
 
@@ -93,11 +93,11 @@ void testClickInterpreterBuildsMessage()
     interpreter.release(std::chrono::milliseconds(500));
     interpreter.press(std::chrono::milliseconds(600));
     interpreter.release(std::chrono::milliseconds(800));
-    interpreter.tick(std::chrono::milliseconds(1400));
+    interpreter.tick(std::chrono::milliseconds(1800));
     requireEqual(interpreter.morse(), "... ");
     requireEqual(interpreter.message(), "S");
 
-    interpreter.tick(std::chrono::milliseconds(1800));
+    interpreter.tick(std::chrono::milliseconds(2800));
     requireEqual(interpreter.morse(), "... / ");
     requireEqual(interpreter.message(), "S ");
 

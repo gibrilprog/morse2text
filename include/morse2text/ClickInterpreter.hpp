@@ -9,8 +9,8 @@ namespace m2t {
 struct TimingConfig {
     std::chrono::milliseconds dotDuration{200};
     std::chrono::milliseconds dashDuration{500};
-    std::chrono::milliseconds letterGap{500};
-    std::chrono::milliseconds wordGap{1000};
+    std::chrono::milliseconds letterGap{1000};
+    std::chrono::milliseconds wordGap{2000};
 };
 
 class ClickInterpreter {
